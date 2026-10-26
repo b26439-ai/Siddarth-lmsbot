@@ -1,0 +1,107 @@
+# Design notes — critical decisions
+
+These are the key decisions behind this submission, why I made them, and what I rejected.
+Detailed working for each task is in the Word documents in this folder and in `BOM/`.
+The full dated log of my decisions is in `Project_Overview_and_Decisions.docx`.
+
+---
+
+## 1. Robot hardware
+
+**Controller — ESP32-WROOM-32 DevKit.**
+Same chip as Appendix A. Two CPU cores (one for control, one for Wi-Fi telemetry),
+12-bit ADC, PWM on any pin, built-in Wi-Fi. I avoided GPIO 6–11 (wired to the flash chip)
+and noted that GPIO 25 is ADC2, not ADC1 as Appendix A states.
+
+**Drive — 2 driven wheels + ball caster (not 4WD).**
+A 2WD robot pivots cleanly about its axle for 90° turns. 4WD skid-steer scrubs its tyres in
+turns, doubles the motor current and needs four matched motors.
+
+**Motors — N20 6 V 300 RPM metal-gear (not yellow TT).**
+I first leaned toward TT motors because they are cheap and easy to mount. I changed to N20
+because Meshmerize junctions can be about 30 cm apart, so the robot spends most of its time
+braking and turning rather than at top speed. N20s are lighter (about 10 g vs 30 g), have metal
+gears with less backlash, and stall at about 1 A instead of 1.5 A, which suits the driver.
+Speed with 42 mm wheels: π × 0.042 × 300 / 60 ≈ 0.66 m/s, which is enough.
+
+**Encoders — left out for now (my decision).**
+They would allow distance measurement and a proper maze map. I deferred them to keep the
+selection-stage robot simple and cheap. They are the first upgrade after selection; encoder N20s
+have the same body, and the BOM leaves about ₹1,400 spare.
+
+**Motor driver — TB6612FNG (not L298N), one spare.**
+At 1 A the TB6612FNG drops about 0.5 V; the L298N drops 1.8–3.2 V, wasting up to 43% of a
+7.4 V battery as heat. The TB6612FNG runs from 3.3 V logic. Its limit is 1.2 A per channel, so I
+checked thermals: only a sustained stall is a risk (≈1.3 W per channel vs 0.78 W the package can
+shed), which the firmware handles. The L298N would only be better for bigger motors or >13.5 V.
+
+**Line sensor — Pololu QTRX-MD-08RC (not SmartElex RLS-08).**
+I asked for "top-notch" sensors and for evidence of how the RLS-08 behaves at 3.3 V. Its maker
+rates it for 4.5–5.0 V only; at 3.3 V its LED current would drop to about 55% (estimate), and at
+5 V its outputs would need dividers. The QTRX runs from 2.9–5.5 V with a constant 3.5 mA LED
+current (same at 3.3 V and 5 V), works best at 10 mm height instead of 3 mm (no risk of
+scraping the arena, which disqualifies), and is read on digital pins, so it works with Wi-Fi on.
+I considered the 5-channel QTRX-MD-05RC but rejected it: its sensors span only 32 mm, and on a
+30 mm line the outer sensors would sit 1 mm from the line edge, ruining junction detection.
+
+**Battery — 2S 1000 mAh 30C LiPo (not 3S, not Li-ion 18650).**
+8.4 V when full stays well inside the TB6612FNG's 13.5 V limit (3S at 12.6 V does not).
+LiPo over Li-ion: about 57 g vs 110 g, 30 A vs 20 A maximum current, and less voltage sag.
+A match uses only about 53 mAh, so the extra capacity of 18650 cells is just extra weight.
+
+## 2. Power design — simplified on purpose
+
+I challenged the first power design and asked for everything non-essential to be removed.
+Final design: battery → XT60 → 3 A fuse → switch, then
+
+- straight to the TB6612FNG motor supply, with **one 470 µF capacitor** at its VM pin
+  (the only capacitor the datasheet actually requires);
+- through an **MP1584 buck converter to 5 V** for the ESP32. I questioned whether it was needed;
+  it stays because without it the ESP32's own regulator would turn about 1.2 W into heat.
+
+Removed: the analog multiplexer, the 5 V-rail capacitor, the 0.1 µF capacitors and the battery
+voltage divider. All grounds meet at one star point at the battery negative.
+
+## 3. Budget
+
+Total **₹8,605** including shipping and a 15% contingency — **₹1,395 under ₹10,000**.
+I dropped the backup RLS-08 sensor and the spare ESP32, but kept a spare motor driver.
+
+## 4. Control (Tasks 1, 3, 9)
+
+- **Task 1 in Python**, so I can explain every line myself.
+- **PD control (PID with Ki = 0).** P steers, D damps the swing. The integral would wind up on
+  long curves and overshoot corners; it stays in the code with Ki = 0 in case the motors turn out
+  mismatched.
+- **Proportional motor limiting — my own function.** I replaced the per-wheel clamp with a
+  function I wrote that scales both wheel commands by the same factor when either exceeds 255.
+  This keeps the left/right ratio, so the robot turns exactly as much as the PID asked for
+  (e.g. 260/40 becomes 255/39 instead of 255/40).
+- **Task 9 kept deliberately simple:** one file, one function per requirement, Appendix A wiring.
+  The only wiring change is IN4 on GPIO 4 instead of GPIO 11 (flash pin).
+
+## 5. Wireless diagnostics (Task 7)
+
+I chose **Wi-Fi** (UDP, ESP32 as its own hotspot). Sending every sample from all 8 sensors at
+1 kHz needs about 300 kbit/s, which only Wi-Fi handles comfortably; a glitch from a bump may last
+only a few milliseconds and would be missed by down-sampled data. Meshmerize requires wireless
+devices to be off near the arena, so this is for the practice track only.
+
+## 6. Maze solving (Task 8)
+
+I chose **DFS (depth-first search)** over the left-hand rule because the Meshmerize sample arena
+has 5 loops, and the left-hand rule plus turn-string reduction only finds the shortest path in a
+loop-free maze. In my example maze with one loop: left-hand replay 240 cm, DFS map + shortest
+route 120 cm. I asked for the code to avoid data-structures topics where possible, so DFS is
+written as six if/else rules and the shortest route uses a simple "repeat and improve" loop
+instead of Dijkstra's priority queue. Without encoders the robot cannot yet recognise revisited
+junctions reliably, so the left-hand rule remains the practical fallback until encoders are added.
+
+## 7. Errors I found in Appendix A and the README
+
+| Item | Problem | Fix used |
+|---|---|---|
+| IN4 on GPIO 11 | GPIO 6–11 belong to the flash chip | GPIO 4 |
+| GPIO 25 "ADC1_CH8" | It is ADC2_CH8 (fails with Wi-Fi on) | Fine in Task 9 (Wi-Fi off) |
+| Reduction rule LBR → S | 270° + 180° + 90° = 540° → 180° = B | LBR → B |
+| Dark line = high voltage | Meshmerize uses a white line | Invert in `scaleSensors()` for the arena |
