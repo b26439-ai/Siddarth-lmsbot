@@ -27,9 +27,6 @@ docs/
   wireless_diagnostics.png          Task 7  data-flow block diagram
   Task8_Maze_Solving.docx           Task 8  DFS vs wall rule, worked example, pseudocode
   maze_example.png                  Task 8  annotated example maze
-  Task9_PID_Notes.docx              Task 9  how the code works, test results, PID tuning
-  Project_Overview_and_Decisions.docx  overview and dated log of my decisions
-src/
   task1/task1.py                    Task 1  centroid and motor-command limiting
   task8_maze/example_maze.py        Task 8  left-hand rule vs DFS on the example maze
   task9_line_follower/task9_line_follower.ino   Task 9  ESP32 PID line follower
